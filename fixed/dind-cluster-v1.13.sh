@@ -49,7 +49,7 @@ if [[ $(uname) == Linux && -z ${DOCKER_HOST:-} ]]; then
     using_local_linuxdocker=1
 fi
 
-EMBEDDED_CONFIG=y;DOWNLOAD_KUBECTL=y;DIND_K8S_VERSION=v1.13;DIND_IMAGE_DIGEST=sha256:0fcb655948a1fa20f5a2100983755edc8f0d763248bda217b3454d82d5cd3be4;DIND_COMMIT=596f7d093470c1dc3a3e4466bcdfb34438a99b90
+EMBEDDED_CONFIG=y;DOWNLOAD_KUBECTL=y;DIND_K8S_VERSION=v1.13;DIND_IMAGE_DIGEST=sha256:c3fd1f7a98c5115bdfe60006b685e1ed08516247cbba35bfc154cf401185f055;DIND_COMMIT=00aa59b2c7c6548fb11099f7e3b7745b3a2e2cfb
 
 # dind::localhost provides the local host IP based on the address family used for service subnet.
 function dind::localhost() {
@@ -483,7 +483,7 @@ for pod_cidr in "${pod_net_cidrs[@]}"; do
   fi
 done
 
-DIND_IMAGE_BASE="${DIND_IMAGE_BASE:-mirantis/kubeadm-dind-cluster}"
+DIND_IMAGE_BASE="${DIND_IMAGE_BASE:-morningspace/kubeadm-dind-cluster}"
 if [[ ${DIND_COMMIT:-} ]]; then
   if [[ ${DIND_COMMIT} = current ]]; then
     DIND_COMMIT="$(cd "${DIND_ROOT}"; git rev-parse HEAD)"
