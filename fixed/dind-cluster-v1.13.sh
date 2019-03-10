@@ -525,6 +525,8 @@ DIND_DAEMON_JSON_FILE="${DIND_DAEMON_JSON_FILE:-/etc/docker/daemon.json}"  # can
 DIND_REGISTRY_MIRROR="${DIND_REGISTRY_MIRROR:-}"  # plain string format
 DIND_INSECURE_REGISTRIES="${DIND_INSECURE_REGISTRIES:-}"  # json list format
 
+DIND_CUSTOM_NETWORK="${DIND_CUSTOM_NETWORK:-}"
+
 FEATURE_GATES="${FEATURE_GATES:-MountPropagation=true}"
 # you can set special value 'none' not to set any kubelet's feature gates.
 KUBELET_FEATURE_GATES="${KUBELET_FEATURE_GATES:-MountPropagation=true,DynamicKubeletConfig=true}"
@@ -1057,6 +1059,14 @@ function dind::run {
          ${opts[@]+"${opts[@]}"} \
          "${DIND_IMAGE}" \
          ${args[@]+"${args[@]}"}
+
+  if [[ ${DIND_CUSTOM_NETWORK} ]]; then
+    local networks=
+    local IFS=','; read -ra networks <<< "${DIND_CUSTOM_NETWORK}"
+    for cust_net in "${networks[@]}"; do
+      docker network connect ${cust_net} ${container_name} >/dev/null
+    done
+  fi
 }
 
 function dind::kubeadm {
