@@ -524,6 +524,8 @@ DIND_NO_PROXY="${DIND_NO_PROXY:-}"
 DIND_DAEMON_JSON_FILE="${DIND_DAEMON_JSON_FILE:-/etc/docker/daemon.json}"  # can be set to /dev/null
 DIND_REGISTRY_MIRROR="${DIND_REGISTRY_MIRROR:-}"  # plain string format
 DIND_INSECURE_REGISTRIES="${DIND_INSECURE_REGISTRIES:-}"  # json list format
+# comma-separated custom network(s) for cluster nodes to join
+DIND_CUSTOM_NETWORKS="${DIND_CUSTOM_NETWORKS:-}"
 
 SKIP_DASHBOARD="${SKIP_DASHBOARD:-}"
 
@@ -1057,6 +1059,14 @@ function dind::run {
          ${opts[@]+"${opts[@]}"} \
          "${DIND_IMAGE}" \
          ${args[@]+"${args[@]}"}
+
+  if [[ -n ${DIND_CUSTOM_NETWORKS} ]]; then
+    local cust_nets
+    local IFS=','; read -ra cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
+    for cust_net in "${cust_nets[@]}"; do
+      docker network connect ${cust_net} ${container_name} >/dev/null
+    done
+  fi
 }
 
 function dind::kubeadm {
@@ -1322,7 +1332,7 @@ EOF
   if [[ ${BUILD_KUBEADM} || ${BUILD_HYPERKUBE} ]]; then
     docker exec "$master_name" mount --make-shared /k8s
   fi
-  kubeadm_join_flags="$(dind::kubeadm "${container_id}" init "${init_args[@]}" --ignore-preflight-errors=all "$@" | grep 'kubeadm join.*--token' | tail -1 | sed 's/^.*kubeadm join //')"
+  kubeadm_join_flags="$(dind::kubeadm "${container_id}" init "${init_args[@]}" --ignore-preflight-errors=all "$@" | grep -A1 'kubeadm join.*--token' | sed 's/^.*kubeadm join //; s/\\$//; N; s/\n//')"
   dind::configure-kubectl
   dind::start-port-forwarder
 }
