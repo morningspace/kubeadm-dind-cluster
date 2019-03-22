@@ -49,7 +49,7 @@ if [[ $(uname) == Linux && -z ${DOCKER_HOST:-} ]]; then
     using_local_linuxdocker=1
 fi
 
-EMBEDDED_CONFIG=y;DOWNLOAD_KUBECTL=y;DIND_K8S_VERSION=v1.12;DIND_IMAGE_DIGEST=sha256:a6534a4425b0427c32f420a2d38c09964327c5515da4f5620f82876507cc8afd;DIND_COMMIT=596f7d093470c1dc3a3e4466bcdfb34438a99b90
+EMBEDDED_CONFIG=y;DOWNLOAD_KUBECTL=y;DIND_K8S_VERSION=v1.12;DIND_IMAGE_DIGEST=sha256:48782c23bedd3f9c3d42af0ab0417eeff7d7884eac20a67adcb0c8534a97fce1;DIND_COMMIT=76f7b8a5f3966aa80700a8c9f92d23f6936f949b
 
 # dind::localhost provides the local host IP based on the address family used for service subnet.
 function dind::localhost() {
@@ -524,10 +524,14 @@ DIND_NO_PROXY="${DIND_NO_PROXY:-}"
 DIND_DAEMON_JSON_FILE="${DIND_DAEMON_JSON_FILE:-/etc/docker/daemon.json}"  # can be set to /dev/null
 DIND_REGISTRY_MIRROR="${DIND_REGISTRY_MIRROR:-}"  # plain string format
 DIND_INSECURE_REGISTRIES="${DIND_INSECURE_REGISTRIES:-}"  # json list format
+# comma-separated custom network(s) for cluster nodes to join
+DIND_CUSTOM_NETWORKS="${DIND_CUSTOM_NETWORKS:-}"
 
-FEATURE_GATES="${FEATURE_GATES:-MountPropagation=true}"
-# you can set special value 'none' not to set any kubelet's feature gates.
-KUBELET_FEATURE_GATES="${KUBELET_FEATURE_GATES:-MountPropagation=true,DynamicKubeletConfig=true}"
+SKIP_DASHBOARD="${SKIP_DASHBOARD:-}"
+
+# you can set special value 'none' not to set any FEATURE_GATES / KUBELET_FEATURE_GATES.
+FEATURE_GATES="${FEATURE_GATES:-none}"
+KUBELET_FEATURE_GATES="${KUBELET_FEATURE_GATES:-DynamicKubeletConfig=true}"
 
 ENABLE_CEPH="${ENABLE_CEPH:-}"
 
@@ -813,12 +817,10 @@ function dind::ensure-kubectl {
     return 0
   fi
   if [ $(uname) = Darwin ]; then
-    if [ ! -f _output/local/bin/darwin/amd64/kubectl ]; then
-      dind::step "Building kubectl"
-      dind::step "+ make WHAT=cmd/kubectl"
-      make WHAT=cmd/kubectl 2>&1 | dind::filter-make-output
-    fi
-  elif ! force_local=y dind::check-binary kubectl; then
+    dind::step "Building kubectl"
+    dind::step "+ make WHAT=cmd/kubectl"
+    make WHAT=cmd/kubectl 2>&1 | dind::filter-make-output
+  else
     dind::make-for-linux y cmd/kubectl
   fi
 }
@@ -1057,6 +1059,14 @@ function dind::run {
          ${opts[@]+"${opts[@]}"} \
          "${DIND_IMAGE}" \
          ${args[@]+"${args[@]}"}
+
+  if [[ -n ${DIND_CUSTOM_NETWORKS} ]]; then
+    local cust_nets
+    local IFS=','; read -ra cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
+    for cust_net in "${cust_nets[@]}"; do
+      docker network connect ${cust_net} ${container_name} >/dev/null
+    done
+  fi
 }
 
 function dind::kubeadm {
@@ -1099,7 +1109,7 @@ function dind::configure-kubectl {
     --server="http://${host}:$(dind::apiserver-port)" \
     --insecure-skip-tls-verify=true
   "${kubectl}" config set-context "$context_name" --cluster="$cluster_name"
-  if [[ ${DIND_LABEL} = ${DEFAULT_DIND_LABEL} ]]; then
+  if [[ ${DIND_LABEL} = "${DEFAULT_DIND_LABEL}" ]]; then
       # Single cluster mode
       "${kubectl}" config use-context "$context_name"
   fi
@@ -1322,7 +1332,7 @@ EOF
   if [[ ${BUILD_KUBEADM} || ${BUILD_HYPERKUBE} ]]; then
     docker exec "$master_name" mount --make-shared /k8s
   fi
-  kubeadm_join_flags="$(dind::kubeadm "${container_id}" init "${init_args[@]}" --ignore-preflight-errors=all "$@" | grep '^ *kubeadm join' | sed 's/^ *kubeadm join //')"
+  kubeadm_join_flags="$(dind::kubeadm "${container_id}" init "${init_args[@]}" --ignore-preflight-errors=all "$@" | grep -A1 'kubeadm join.*--token' | sed 's/^.*kubeadm join //; s/\\$//; N; s/\n//')"
   dind::configure-kubectl
   dind::start-port-forwarder
 }
@@ -1497,6 +1507,36 @@ function dind::ip6tables-on-hostnet {
   docker run -v "${mod_path}:${mod_path}" --entrypoint /sbin/ip6tables --net=host --rm --privileged "${DIND_IMAGE}" "$@"
 }
 
+function dind::component-ready-by-labels {
+  local labels=("$@");
+  for label in ${labels[@]}; do
+    dind::component-ready "${label}" && return 0
+  done
+  return 1
+}
+
+function dind::wait-for-service-ready {
+  local service=$1
+  local labels=("${@:2}")
+  local ctx="$(dind::context-name)"
+
+  dind::step "Bringing up ${service}"
+  # on Travis 'scale' sometimes fails with 'error: Scaling the resource failed with: etcdserver: request timed out; Current resource version 442' here
+  dind::retry "${kubectl}" --context "$ctx" scale deployment --replicas=1 -n kube-system ${service}
+
+  local ntries=200
+  while ! dind::component-ready-by-labels ${labels[@]}; do
+    if ((--ntries == 0)); then
+      echo "Error bringing up ${service}" >&2
+      exit 1
+    fi
+    echo -n "." >&2
+    dind::kill-failed-pods
+    sleep 1
+  done
+  echo "[done]" >&2
+}
+
 function dind::wait-for-ready {
   local app="kube-proxy"
   if [[ ${CNI_PLUGIN} = "kube-router" ]]; then
@@ -1537,28 +1577,22 @@ function dind::wait-for-ready {
     sleep 1
   done
 
-  dind::step "Bringing up ${DNS_SERVICE} and kubernetes-dashboard"
-  # on Travis 'scale' sometimes fails with 'error: Scaling the resource failed with: etcdserver: request timed out; Current resource version 442' here
-  dind::retry "${kubectl}" --context "$ctx" scale deployment --replicas=1 -n kube-system ${DNS_SERVICE}
-  dind::retry "${kubectl}" --context "$ctx" scale deployment --replicas=1 -n kube-system kubernetes-dashboard
+  dind::wait-for-service-ready ${DNS_SERVICE} "k8s-app=kube-dns"
 
-  ntries=200
-  while ! dind::component-ready k8s-app=kube-dns || ! dind::component-ready app=kubernetes-dashboard; do
-    if ((--ntries == 0)); then
-      echo "Error bringing up ${DNS_SERVICE} and kubernetes-dashboard" >&2
-      exit 1
-    fi
-    echo -n "." >&2
-    dind::kill-failed-pods
-    sleep 1
-  done
-  echo "[done]" >&2
+  if [[ ! ${SKIP_DASHBOARD} ]]; then
+    local service="kubernetes-dashboard"
+    dind::wait-for-service-ready ${service} "app=${service}" "k8s-app=${service}"
+  fi
 
   dind::retry "${kubectl}" --context "$ctx" get nodes >&2
 
-  local local_host
-  local_host="$( dind::localhost )"
-  dind::step "Access dashboard at:" "http://${local_host}:$(dind::apiserver-port)/api/v1/namespaces/kube-system/services/kubernetes-dashboard:/proxy"
+  if [[ ! ${SKIP_DASHBOARD} ]]; then
+    local local_host
+    local_host="$( dind::localhost )"
+    local base_url="http://${local_host}:$(dind::apiserver-port)/api/v1/namespaces/kube-system/services"
+    dind::step "Access dashboard at:" "${base_url}/kubernetes-dashboard:/proxy"
+    dind::step "Access dashboard at:" "${base_url}/https:kubernetes-dashboard:/proxy (if version>1.6 and HTTPS enabled)"
+  fi
 }
 
 # dind::make-kube-router-yaml creates a temp file with contents of the configuration needed for the kube-router CNI
@@ -1824,7 +1858,11 @@ function dind::up {
       echo "Unsupported CNI plugin '${CNI_PLUGIN}'" >&2
       ;;
   esac
-  dind::deploy-dashboard
+
+  if [[ ! ${SKIP_DASHBOARD} ]]; then
+    dind::deploy-dashboard
+  fi
+
   dind::accelerate-kube-dns
   if [[ (${CNI_PLUGIN} != "bridge" && ${CNI_PLUGIN} != "ptp") || ${SKIP_SNAPSHOT} ]]; then
     # This is especially important in case of Calico -
