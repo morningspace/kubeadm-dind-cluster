@@ -2065,7 +2065,7 @@ function dind::start-port-forwarder {
 
   port="$( dind::apiserver-port )"
   dind::step "+ Setting up port-forwarding for :${port}"
-  output=$(ps | grep ${port})
+  output=$(ps)
   echo $output
   "$fwdr" "$port"
 }
