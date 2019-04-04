@@ -524,7 +524,7 @@ DIND_NO_PROXY="${DIND_NO_PROXY:-}"
 DIND_DAEMON_JSON_FILE="${DIND_DAEMON_JSON_FILE:-/etc/docker/daemon.json}"  # can be set to /dev/null
 DIND_REGISTRY_MIRROR="${DIND_REGISTRY_MIRROR:-}"  # plain string format
 DIND_INSECURE_REGISTRIES="${DIND_INSECURE_REGISTRIES:-}"  # json list format
-# comma-separated custom network(s) for cluster nodes to join
+# comma-separated custom network(s) for cluster nodes to join, e.g. "net1, net2"
 DIND_CUSTOM_NETWORKS="${DIND_CUSTOM_NETWORKS:-}"
 
 SKIP_DASHBOARD="${SKIP_DASHBOARD:-}"
@@ -1062,7 +1062,7 @@ function dind::run {
 
   if [[ -n ${DIND_CUSTOM_NETWORKS} ]]; then
     local cust_nets
-    local IFS=','; read -ra cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
+    IFS=', ' read -r -a cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
     for cust_net in "${cust_nets[@]}"; do
       docker network connect ${cust_net} ${container_name} >/dev/null
     done
