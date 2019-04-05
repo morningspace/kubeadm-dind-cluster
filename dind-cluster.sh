@@ -1062,7 +1062,7 @@ function dind::run {
 
   if [[ -n ${DIND_CUSTOM_NETWORKS} ]]; then
     local cust_nets
-    local IFS=', ' read -r -a cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
+    IFS=', ' read -r -a cust_nets <<< "${DIND_CUSTOM_NETWORKS}"
     for cust_net in "${cust_nets[@]}"; do
       docker network connect ${cust_net} ${container_name} >/dev/null
     done
