@@ -10,7 +10,7 @@ prereqs: &prereqs
   name: Install prerequisites
   command: |
     apt-get -qq update
-    apt-get install -qqy curl ca-certificates git bzip2
+    apt-get install -qqy curl ca-certificates git bzip2 net-tools
 
 prereqs_machine: &prereqs_machine
   name: Install prerequisites
