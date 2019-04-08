@@ -2066,7 +2066,8 @@ function dind::start-port-forwarder {
   port="$( dind::apiserver-port )"
   dind::step "+ Setting up port-forwarding for :${port}"
   ps
-  netstat -tulnp
+  netstat -abn
+  docker ps
   "$fwdr" "$port"
 }
 
